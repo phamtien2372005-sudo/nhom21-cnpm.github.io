@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Library Management</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/supabase-client.js"></script>
+    <script src="js/app.js"></script>
+    <style>
+        .stats-grid { display: grid; grid-template-columns: repeat(4,1fr); gap:20px; margin-bottom:30px; }
+        .stat-card { background:white; padding:20px; border-radius:12px; text-align:center; box-shadow:0 2px 8px rgba(0,0,0,0.1); }
+        .stat-number { font-size:32px; font-weight:bold; color:#00BCD4; }
+        .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:20px; }
+        .book-card { background:white; border-radius:12px; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,0.1); }
+        .book-image { height:150px; background:#00BCD4; display:flex; align-items:center; justify-content:center; color:white; font-size:24px; font-weight:bold; }
+        .book-info { padding:15px; }
+        .book-status { display:inline-block; padding:4px 8px; border-radius:20px; font-size:12px; margin-top:8px; }
+        .available { background:#51CF66; color:white; }
+        .borrowed { background:#FF6B6B; color:white; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">THƯ VIỆN</div>
+        <div class="user-profile">
+            <div class="user-avatar" id="avatarInitial">TV</div>
+            <div class="user-info"><strong id="userName"></strong><small id="userRole"></small></div>
+        </div>
+    </div>
+    <div id="sidebar" class="sidebar"></div>
+    <div class="main-content">
+        <div class="dashboard-welcome card"><h1>Xin chào, <span id="welcomeName"></span></h1></div>
+        <div class="stats-grid" id="statsGrid"></div>
+        <h3>Sách nổi bật</h3>
+        <div class="grid" id="booksGrid">Đang tải...</div>
+    </div>
+    <div id="alert-container"></div>
+    <script>
+        let currentUser = null;
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            currentUser = AuthManager.getCurrentUser();
+            if (!currentUser) { window.location.href = 'index.html'; return; }
+            document.getElementById('userName').innerText = currentUser.full_name;
+            document.getElementById('userRole').innerText = currentUser.role === 'admin' ? 'Admin' : 'Thủ thư';
+            document.getElementById('avatarInitial').innerText = currentUser.full_name.charAt(0).toUpperCase();
+            document.getElementById('welcomeName').innerText = currentUser.full_name;
+            renderSidebar();
+            await loadStats();
+            await loadBooks();
+        });
+
+        function renderSidebar() {
+    const isAdmin = currentUser.role === 'admin';
+        const isLibrarian = currentUser.role === 'librarian';
+
+    let html = '<h1>MAIN MENU</h1><ul class="nav-menu">';
+    html += '<li class="nav-item"><a href="dashboard.html" class="nav-link active">🏠 Trang chủ</a></li>';
+    html += '<li class="nav-item"><a href="FormMuonSach.html" class="nav-link">📘 Mượn sách</a></li>';
+    html += '<li class="nav-item"><a href="FormThemXoaSua.html" class="nav-link">📝 Quản lý sách</a></li>';
+    html += '<li class="nav-item"><a href="FormTraCuuDocGia.html" class="nav-link">🔎 Tra cứu độc giả</a></li>';
+    html += '<li class="nav-item"><a href="FormTraCuuMuonTra.html" class="nav-link">📚 Tra cứu mượn trả</a></li>';
+    html += '<li class="nav-item"><a href="FormTinhTrangTaiLieu.html" class="nav-link">📄 Tình trạng sách</a></li>';
+    html += '<li class="nav-item"><a href="FromTimKiem.html" class="nav-link">🔍 Tìm kiếm</a></li>';
+    
+    if (isAdmin) {
+        html += '<li class="nav-item"><a href="statistical.html" class="nav-link">📊 Thống kê</a></li>';
+        html += '<li class="nav-item"><a href="admin_users.html" class="nav-link">👥 Quản lý nhân viên</a></li>';
+        html += '<li class="nav-item"><a href="admin_help_requests.html" class="nav-link">📬 Yêu cầu hỗ trợ</a></li>';
+        html += '<li class="nav-item"><a href="payments.html" class="nav-link">💰 Quản lý thanh toán</a></li>';
+    }
+    
+    html += '</ul><h1>HỖ TRỢ</h1><ul>';
+    html += '<li class="nav-item"><a href="settings.html " class="nav-link">⚙️ Cài đặt</a></li>';
+    if(isLibrarian) {
+        html += '<li class="nav-item"><a href="help.html" class="nav-link">❓ Trợ giúp</a></li>';
+    }
+    html += '<li class="nav-item"><a href="#" onclick="handleLogout()" class="nav-link">🚪 Đăng xuất</a></li></ul>';
+    document.getElementById('sidebar').innerHTML = html;
+}
+        async function loadStats() {
+            const books = await SupabaseDB.getBooks();
+            const readers = await SupabaseDB.getReaders();
+            const authors = await SupabaseDB.getAuthors();
+            const borrows = await SupabaseDB.getBorrowing();
+            const active = borrows.filter(b=>!b.return_date).length;
+            document.getElementById('statsGrid').innerHTML = `
+                <div class="stat-card"><div>📚</div><div class="stat-number">${books.length}</div><div>Sách</div></div>
+                <div class="stat-card"><div>👥</div><div class="stat-number">${readers.length}</div><div>Độc giả</div></div>
+                <div class="stat-card"><div>✍️</div><div class="stat-number">${authors.length}</div><div>Tác giả</div></div>
+                <div class="stat-card"><div>📤</div><div class="stat-number">${active}</div><div>Đang mượn</div></div>
+            `;
+        }
+
+        async function loadBooks() {
+            const books = await SupabaseDB.getBooks();
+            const authors = await SupabaseDB.getAuthors();
+            let html = '';
+            books.slice(0,6).forEach(b => {
+                const author = authors.find(a=>a.id==b.author_id);
+                html += `<div class="book-card"><div class="book-image">${b.title.substring(0,2)}</div><div class="book-info"><div class="book-title">${escapeHtml(b.title)}</div><div>${author ? escapeHtml(author.name) : '?'}</div><div class="book-status ${b.available>0?'available':'borrowed'}">${b.available>0?'Có sẵn':'Đã mượn'}</div></div></div>`;
+            });
+            document.getElementById('booksGrid').innerHTML = html || 'Chưa có sách';
+        }
+
+        function escapeHtml(s) { return s ? s.replace(/[&<>]/g, m => m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;') : ''; }
+        function handleLogout() { AuthManager.logout(); window.location.href = 'index.html'; }
+    </script>
+</body>
+</html>

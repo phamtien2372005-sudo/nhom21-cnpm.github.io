@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quản lý nhân viên - Library Management</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/supabase-client.js"></script>
+    <script src="js/app.js"></script>
+    <style>
+        .table-container { overflow-x: auto; margin-top:20px; }
+        table { width:100%; border-collapse:collapse; background:white; }
+        th, td { padding:12px; border-bottom:1px solid #eee; text-align:left; }
+        th { background:#f5f5f5; }
+        .btn-sm { padding:5px 12px; font-size:12px; margin:2px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">THƯ VIỆN</div>
+        <div class="user-profile">
+            <div class="user-avatar" id="avatarInitial">TV</div>
+            <div class="user-info"><strong id="userName"></strong><small id="userRole"></small></div>
+        </div>
+    </div>
+    <div id="sidebar" class="sidebar"></div>
+    <div class="main-content">
+        <div class="page-title"><h2>👥 QUẢN LÝ NHÂN VIÊN</h2></div>
+        <div class="page-shell">
+            <div class="page-card">
+                <div class="page-header">
+                    <div><h2>Danh sách thủ thư</h2><p class="subtext">Chỉ admin mới quản lý được</p></div>
+                    <button class="btn btn-primary" onclick="openAddUserModal()">+ Thêm thủ thư</button>
+                </div>
+                <div class="table-container">
+                    <div id="usersTable">Đang tải...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal thêm/sửa user -->
+    <div id="userModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Thêm thủ thư</h2>
+                <button class="modal-close" onclick="closeUserModal()">&times;</button>
+            </div>
+            <form id="userForm">
+                <div class="form-group"><label>Họ tên *</label><input type="text" id="fullName" required></div>
+                <div class="form-group"><label>Email *</label><input type="email" id="email" required></div>
+                <div class="form-group"><label>Tên đăng nhập *</label><input type="text" id="username" required></div>
+                <div class="form-group"><label>Mật khẩu *</label><input type="password" id="password" required></div>
+                <div class="form-group">
+                    <label>Vai trò</label>
+                    <div class="role-text" style="padding:8px 12px; background:#f0f0f0; border-radius:6px;">Thủ thư</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeUserModal()">Hủy</button>
+                    <button type="submit" class="btn btn-primary">Lưu</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="alert-container"></div>
+
+    <script>
+        let currentEditId = null, currentUser = null;
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            currentUser = AuthManager.getCurrentUser();
+            if (!currentUser) { window.location.href = 'index.html'; return; }
+            if (currentUser.role !== 'admin') { window.location.href = 'dashboard.html'; return; }
+            document.getElementById('userName').innerText = currentUser.full_name;
+            document.getElementById('userRole').innerText = 'Admin';
+            document.getElementById('avatarInitial').innerText = currentUser.full_name.charAt(0).toUpperCase();
+            renderSidebar();
+            await loadUsers();
+        });
+
+        function renderSidebar() {
+    const isAdmin = currentUser.role === 'admin';
+    let html = '<h1>MAIN MENU</h1><ul class="nav-menu">';
+    html += '<li class="nav-item"><a href="dashboard.html" class="nav-link">🏠 Trang chủ</a></li>';
+    html += '<li class="nav-item"><a href="FormMuonSach.html" class="nav-link">📘 Mượn sách</a></li>';
+    html += '<li class="nav-item"><a href="FormThemXoaSua.html" class="nav-link">📝 Quản lý sách</a></li>';
+    html += '<li class="nav-item"><a href="FormTraCuuDocGia.html" class="nav-link">🔎 Tra cứu độc giả</a></li>';
+    html += '<li class="nav-item"><a href="FormTraCuuMuonTra.html" class="nav-link">📚 Tra cứu mượn trả</a></li>';
+    html += '<li class="nav-item"><a href="FormTinhTrangTaiLieu.html" class="nav-link">📄 Tình trạng sách</a></li>';
+    html += '<li class="nav-item"><a href="FromTimKiem.html" class="nav-link">🔍 Tìm kiếm</a></li>';
+    
+        html += '<li class="nav-item"><a href="statistical.html" class="nav-link">📊 Thống kê</a></li>';
+        html += '<li class="nav-item"><a href="admin_users.html" class="nav-link active">👥 Quản lý nhân viên</a></li>';
+        html += '<li class="nav-item"><a href="admin_help_requests.html" class="nav-link">📬 Yêu cầu hỗ trợ</a></li>';
+html += '<li class="nav-item"><a href="payments.html" class="nav-link">💰 Quản lý thanh toán</a></li>';
+    html += '</ul><h1>HỖ TRỢ</h1><ul>';
+    html += '<li class="nav-item"><a href="settings.html " class="nav-link">⚙️ Cài đặt</a></li>';
+    html += '<li class="nav-item"><a href="#" onclick="handleLogout()" class="nav-link">🚪 Đăng xuất</a></li></ul>';
+    document.getElementById('sidebar').innerHTML = html;
+}
+
+        async function loadUsers() {
+            // Chỉ lấy user có role = 'librarian' (thủ thư)
+            const { data: users, error } = await window.supabaseClient
+                .from('users')
+                .select('*')
+                .eq('role', 'librarian')
+                .order('id', { ascending: true });
+            if (error) { console.error(error); document.getElementById('usersTable').innerHTML = '<div style="text-align:center;padding:40px;">Lỗi tải dữ liệu</div>'; return; }
+            const container = document.getElementById('usersTable');
+            if (!users.length) { container.innerHTML = '<div style="text-align:center;padding:40px;">Chưa có thủ thư nào</div>'; return; }
+            let html = `<table><thead><tr><th>STT</th><th>Họ tên</th><th>Email</th><th>Tên đăng nhập</th><th>Hành động</th></tr></thead><tbody>`;
+            users.forEach((u, index) => {
+                html += `<tr>
+                    <td>${index + 1}</span></td>
+                    <td>${escapeHtml(u.full_name)}</span></td>
+                    <td>${escapeHtml(u.email)}</span></td>
+                    <td>${escapeHtml(u.username)}</span></td>
+                    <td>
+                        <button class="btn btn-sm btn-primary" onclick="editUser(${u.id})">Sửa</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteUser(${u.id})">Xóa</button>
+                    </td>
+                </tr>`;
+            });
+            html += '</tbody></tr>';
+            container.innerHTML = html;
+        }
+
+        function openAddUserModal() {
+            currentEditId = null;
+            document.getElementById('modalTitle').innerText = 'Thêm thủ thư';
+            document.getElementById('userForm').reset();
+            UIManager.showModal(document.getElementById('userModal'), true);
+        }
+
+        function closeUserModal() {
+            UIManager.showModal(document.getElementById('userModal'), false);
+        }
+
+        document.getElementById('userForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const userData = {
+                full_name: document.getElementById('fullName').value.trim(),
+                email: document.getElementById('email').value.trim(),
+                username: document.getElementById('username').value.trim(),
+                password: document.getElementById('password').value.trim(),
+                role: 'librarian'
+            };
+            if (!userData.full_name || !userData.email || !userData.username || !userData.password) {
+                UIManager.showAlert('Vui lòng điền đầy đủ thông tin', 'error');
+                return;
+            }
+            try {
+                if (currentEditId) {
+                    const { error } = await window.supabaseClient
+                        .from('users')
+                        .update({
+                            full_name: userData.full_name,
+                            email: userData.email,
+                            username: userData.username,
+                            password: userData.password
+                        })
+                        .eq('id', currentEditId);
+                    if (error) throw error;
+                    UIManager.showAlert('Cập nhật thành công!', 'success');
+                } else {
+                    const { data: exist } = await window.supabaseClient
+                        .from('users')
+                        .select('username')
+                        .eq('username', userData.username)
+                        .maybeSingle();
+                    if (exist) return UIManager.showAlert('Tên đăng nhập đã tồn tại', 'error');
+                    const { error } = await window.supabaseClient
+                        .from('users')
+                        .insert([userData]);
+                    if (error) throw error;
+                    UIManager.showAlert('Thêm thủ thư thành công!', 'success');
+                }
+                closeUserModal();
+                await loadUsers(); // load lại danh sách -> STT tự động cập nhật
+            } catch (error) {
+                console.error(error);
+                UIManager.showAlert('Lỗi: ' + error.message, 'error');
+            }
+        });
+
+        async function editUser(id) {
+            const { data: user, error } = await window.supabaseClient
+                .from('users')
+                .select('*')
+                .eq('id', id)
+                .maybeSingle();
+            if (error || !user) return;
+            currentEditId = id;
+            document.getElementById('modalTitle').innerText = 'Sửa thủ thư';
+            document.getElementById('fullName').value = user.full_name;
+            document.getElementById('email').value = user.email;
+            document.getElementById('username').value = user.username;
+            document.getElementById('password').value = user.password;
+            UIManager.showModal(document.getElementById('userModal'), true);
+        }
+
+        async function deleteUser(id) {
+            if (!confirm('Xóa thủ thư này?')) return;
+            const { error } = await window.supabaseClient
+                .from('users')
+                .delete()
+                .eq('id', id);
+            if (error) { UIManager.showAlert('Lỗi khi xóa', 'error'); return; }
+            UIManager.showAlert('Xóa thành công!', 'success');
+            await loadUsers(); // load lại danh sách -> STT tự động cập nhật
+        }
+
+        function handleLogout() {
+            AuthManager.logout();
+            window.location.href = 'index.html';
+        }
+
+        function escapeHtml(s) {
+            if (!s) return '';
+            return s.replace(/[&<>]/g, m => m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;');
+        }
+    </script>
+</body>
+</html>

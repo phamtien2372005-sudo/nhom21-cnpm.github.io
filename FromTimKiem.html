@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tìm kiếm - Library Management</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/supabase-client.js"></script>
+    <script src="js/app.js"></script>
+    <style>
+        .result-type { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; margin-right: 10px; }
+        .type-book { background-color: #E3F2FD; color: #1565C0; }
+        .type-reader { background-color: #E8F5E9; color: #2E7D32; }
+        .type-borrow { background-color: #FFF3E0; color: #E65100; }
+        .table-container { overflow-x: auto; margin-top:20px; }
+        table { width:100%; border-collapse:collapse; background:white; }
+        th, td { padding:12px; border-bottom:1px solid #eee; text-align:left; }
+        th { background:#f5f5f5; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">THƯ VIỆN</div>
+        <div class="user-profile">
+            <div class="user-avatar" id="avatarInitial">TV</div>
+            <div class="user-info"><strong id="userName"></strong><small id="userRole"></small></div>
+        </div>
+    </div>
+    <div id="sidebar" class="sidebar"></div>
+    <div class="main-content">
+        <div class="page-title"><h2>🔍 TÌM KIẾM</h2></div>
+        <div class="page-shell">
+            <div class="page-card">
+                <div class="page-header"><div><h2>Tìm kiếm toàn hệ thống</h2><p class="subtext">Sách, độc giả, phiếu mượn</p></div></div>
+                <div class="card-row">
+                    <div class="form-group"><label>Từ khóa</label><input type="text" id="keyword" class="form-control" placeholder="Nhập tên sách, tác giả, độc giả, ISBN..." onkeyup="search()"></div>
+                    <div class="form-group"><label>Loại tìm kiếm</label><select id="searchType" class="form-control" onchange="search()"><option value="all">Tất cả</option><option value="books">Sách</option><option value="readers">Độc giả</option><option value="borrowings">Phiếu mượn</option></select></div>
+                </div>
+                <div class="table-container"><div id="resultsTable">Nhập từ khóa để tìm kiếm</div></div>
+            </div>
+        </div>
+    </div>
+    <div id="alert-container"></div>
+    <script>
+        let allBooks = [], allReaders = [], allBorrowings = [], allAuthors = [], currentUser = null;
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            currentUser = AuthManager.getCurrentUser();
+            if (!currentUser) { window.location.href = 'index.html'; return; }
+            document.getElementById('userName').innerText = currentUser.full_name;
+            document.getElementById('userRole').innerText = currentUser.role === 'admin' ? 'Admin' : 'Thủ thư';
+            document.getElementById('avatarInitial').innerText = currentUser.full_name.charAt(0).toUpperCase();
+            renderSidebar();
+            await loadData();
+        });
+
+        function renderSidebar() {
+    const isAdmin = currentUser.role === 'admin';
+    const isLibrarian = currentUser.role === 'librarian';
+    let html = '<h1>MAIN MENU</h1><ul class="nav-menu">';
+    html += '<li class="nav-item"><a href="dashboard.html" class="nav-link">🏠 Trang chủ</a></li>';
+    html += '<li class="nav-item"><a href="FormMuonSach.html" class="nav-link">📘 Mượn sách</a></li>';
+    html += '<li class="nav-item"><a href="FormThemXoaSua.html" class="nav-link">📝 Quản lý sách</a></li>';
+    html += '<li class="nav-item"><a href="FormTraCuuDocGia.html" class="nav-link">🔎 Tra cứu độc giả</a></li>';
+    html += '<li class="nav-item"><a href="FormTraCuuMuonTra.html" class="nav-link">📚 Tra cứu mượn trả</a></li>';
+    html += '<li class="nav-item"><a href="FormTinhTrangTaiLieu.html" class="nav-link">📄 Tình trạng sách</a></li>';
+    html += '<li class="nav-item"><a href="FromTimKiem.html" class="nav-link active">🔍 Tìm kiếm</a></li>';
+    
+    if (isAdmin) {
+        html += '<li class="nav-item"><a href="statistical.html" class="nav-link">📊 Thống kê</a></li>';
+        html += '<li class="nav-item"><a href="admin_users.html" class="nav-link">👥 Quản lý nhân viên</a></li>';
+        html += '<li class="nav-item"><a href="admin_help_requests.html" class="nav-link">📬 Yêu cầu hỗ trợ</a></li>';
+        html += '<li class="nav-item"><a href="payments.html" class="nav-link">💰 Quản lý thanh toán</a></li>';
+    }
+    
+    html += '</ul><h1>HỖ TRỢ</h1><ul>';
+    html += '<li class="nav-item"><a href="settings.html " class="nav-link">⚙️ Cài đặt</a></li>';
+if(isLibrarian) {
+        html += '<li class="nav-item"><a href="help.html" class="nav-link">❓ Trợ giúp</a></li>';
+    }    html += '<li class="nav-item"><a href="#" onclick="handleLogout()" class="nav-link">🚪 Đăng xuất</a></li></ul>';
+    document.getElementById('sidebar').innerHTML = html;
+}
+
+        async function loadData() {
+            allBooks = await SupabaseDB.getBooks();
+            allReaders = await SupabaseDB.getReaders();
+            allBorrowings = await SupabaseDB.getBorrowing();
+            allAuthors = await SupabaseDB.getAuthors();
+        }
+
+        async function search() {
+            const kw = document.getElementById('keyword').value.toLowerCase().trim();
+            const type = document.getElementById('searchType').value;
+            if (!kw) { document.getElementById('resultsTable').innerHTML = '<div style="text-align:center;padding:40px;">Nhập từ khóa để tìm kiếm</div>'; return; }
+            let results = [];
+            if (type === 'all' || type === 'books') {
+                for (const b of allBooks) {
+                    if (b.title.toLowerCase().includes(kw) || (b.isbn && b.isbn.includes(kw))) {
+                        const author = allAuthors.find(a => a.id == b.author_id);
+                        results.push({ type: 'book', typeName: '📖 Sách', title: b.title, detail: `Tác giả: ${author ? author.name : 'Ẩn danh'} | ISBN: ${b.isbn || 'N/A'} | Còn: ${b.available}/${b.quantity}` });
+                    }
+                }
+            }
+            if (type === 'all' || type === 'readers') {
+                for (const r of allReaders) {
+                    if (r.full_name.toLowerCase().includes(kw) || r.email.toLowerCase().includes(kw) || (r.phone && r.phone.includes(kw))) {
+                        results.push({ type: 'reader', typeName: '👤 Độc giả', title: r.full_name, detail: `Email: ${r.email} | SĐT: ${r.phone || 'N/A'} | Trạng thái: ${r.status === 'active' ? 'Hoạt động' : 'Không hoạt động'}` });
+                    }
+                }
+            }
+            if (type === 'all' || type === 'borrowings') {
+                for (const b of allBorrowings) {
+                    const reader = allReaders.find(r => r.id == b.reader_id);
+                    const book = allBooks.find(bk => bk.id == b.book_id);
+                    if ((reader?.full_name || '').toLowerCase().includes(kw) || (book?.title || '').toLowerCase().includes(kw)) {
+                        results.push({ type: 'borrow', typeName: '📋 Phiếu mượn', title: `${reader?.full_name || '?'} - ${book?.title || '?'}`, detail: `Ngày mượn: ${formatDate(b.borrow_date)} | Hạn trả: ${formatDate(b.due_date)} | Trạng thái: ${b.return_date ? 'Đã trả' : 'Đang mượn'}` });
+                    }
+                }
+            }
+            renderResults(results);
+        }
+
+        function renderResults(results) {
+            const container = document.getElementById('resultsTable');
+            if (!results.length) { container.innerHTML = '<div style="text-align:center;padding:40px;">Không tìm thấy kết quả</div>'; return; }
+            let html = `<table><thead><tr><th>Loại</th><th>Tiêu đề</th><th>Chi tiết</th></tr></thead><tbody>`;
+            for (const r of results) {
+                let typeClass = r.type === 'book' ? 'type-book' : (r.type === 'reader' ? 'type-reader' : 'type-borrow');
+                html += `<tr><td><span class="result-type ${typeClass}">${r.typeName}</span></td><td><strong>${escapeHtml(r.title)}</strong></td><td>${escapeHtml(r.detail)}</td></tr>`;
+            }
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        }
+
+        function formatDate(d) { return d ? new Date(d).toLocaleDateString('vi-VN') : '-'; }
+        function escapeHtml(s) { return s ? s.replace(/[&<>]/g, m => m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;') : ''; }
+        function handleLogout() { AuthManager.logout(); window.location.href = 'index.html'; }
+    </script>
+</body>
+</html>

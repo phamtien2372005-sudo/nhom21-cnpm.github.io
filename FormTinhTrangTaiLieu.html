@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tình trạng sách - Library Management</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/supabase-client.js"></script>
+    <script src="js/app.js"></script>
+    <style>
+        .status-available { color: green; font-weight: bold; }
+        .status-out { color: red; font-weight: bold; }
+        .status-low { color: orange; font-weight: bold; }
+        .table-container { overflow-x: auto; margin-top:20px; }
+        table { width:100%; border-collapse:collapse; background:white; }
+        th, td { padding:12px; border-bottom:1px solid #eee; text-align:left; }
+        th { background:#f5f5f5; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">THƯ VIỆN</div>
+        <div class="user-profile">
+            <div class="user-avatar" id="avatarInitial">TV</div>
+            <div class="user-info"><strong id="userName"></strong><small id="userRole"></small></div>
+        </div>
+    </div>
+    <div id="sidebar" class="sidebar"></div>
+    <div class="main-content">
+        <div class="page-title"><h2>📊 TÌNH TRẠNG SÁCH</h2></div>
+        <div class="page-shell">
+            <div class="page-card">
+                <div class="page-header"><div><h2>Kiểm tra số lượng sách</h2><p class="subtext">Số sách còn lại trong thư viện</p></div></div>
+                <div class="form-group"><input type="text" id="searchInput" class="form-control" placeholder="Nhập tên sách hoặc ISBN..." onkeyup="filterBooks()"></div>
+                <div class="table-container"><div id="booksTable">Đang tải...</div></div>
+            </div>
+        </div>
+    </div>
+    <div id="alert-container"></div>
+    <script>
+        let allBooks = [], allCategories = [], currentUser = null;
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            currentUser = AuthManager.getCurrentUser();
+            if (!currentUser) { window.location.href = 'index.html'; return; }
+            document.getElementById('userName').innerText = currentUser.full_name;
+            document.getElementById('userRole').innerText = currentUser.role === 'admin' ? 'Admin' : 'Thủ thư';
+            document.getElementById('avatarInitial').innerText = currentUser.full_name.charAt(0).toUpperCase();
+            renderSidebar();
+            await loadBooks();
+        });
+
+        function renderSidebar() {
+    const isAdmin = currentUser.role === 'admin';
+    const isLibrarian = currentUser.role === 'librarian';
+    let html = '<h1>MAIN MENU</h1><ul class="nav-menu">';
+    html += '<li class="nav-item"><a href="dashboard.html" class="nav-link">🏠 Trang chủ</a></li>';
+    html += '<li class="nav-item"><a href="FormMuonSach.html" class="nav-link">📘 Mượn sách</a></li>';
+    html += '<li class="nav-item"><a href="FormThemXoaSua.html" class="nav-link">📝 Quản lý sách</a></li>';
+    html += '<li class="nav-item"><a href="FormTraCuuDocGia.html" class="nav-link">🔎 Tra cứu độc giả</a></li>';
+    html += '<li class="nav-item"><a href="FormTraCuuMuonTra.html" class="nav-link">📚 Tra cứu mượn trả</a></li>';
+    html += '<li class="nav-item"><a href="FormTinhTrangTaiLieu.html" class="nav-link active">📄 Tình trạng sách</a></li>';
+    html += '<li class="nav-item"><a href="FromTimKiem.html" class="nav-link">🔍 Tìm kiếm</a></li>';
+    
+    if (isAdmin) {
+        html += '<li class="nav-item"><a href="statistical.html" class="nav-link">📊 Thống kê</a></li>';
+        html += '<li class="nav-item"><a href="admin_users.html" class="nav-link">👥 Quản lý nhân viên</a></li>';
+        html += '<li class="nav-item"><a href="admin_help_requests.html" class="nav-link">📬 Yêu cầu hỗ trợ</a></li>';
+    html += '<li class="nav-item"><a href="payments.html" class="nav-link">💰 Quản lý thanh toán</a></li>';
+    }
+    
+    html += '</ul><h1>HỖ TRỢ</h1><ul>';
+    html += '<li class="nav-item"><a href="settings.html " class="nav-link">⚙️ Cài đặt</a></li>';
+if(isLibrarian) {
+        html += '<li class="nav-item"><a href="help.html" class="nav-link">❓ Trợ giúp</a></li>';
+    }    html += '<li class="nav-item"><a href="#" onclick="handleLogout()" class="nav-link">🚪 Đăng xuất</a></li></ul>';
+    document.getElementById('sidebar').innerHTML = html;
+}
+
+        async function loadBooks() {
+            allBooks = await SupabaseDB.getBooks();
+            allCategories = await SupabaseDB.getCategories();
+            renderBooksTable(allBooks);
+        }
+
+        function renderBooksTable(books) {
+            const container = document.getElementById('booksTable');
+            if (!books.length) { container.innerHTML = '<div style="text-align:center;padding:40px;">Chưa có sách</div>'; return; }
+            let html = `<table><thead><tr><th>Mã</th><th>Tiêu đề</th><th>Thể loại</th><th>ISBN</th><th>Số lượng</th><th>Còn lại</th><th>Vị trí</th><th>Trạng thái</th></tr></thead><tbody>`;
+            for (const b of books) {
+                const cat = allCategories.find(c => c.id == b.category_id);
+                let statusClass = '', statusText = '';
+                if (b.available <= 0) { statusClass = 'status-out'; statusText = 'Hết sách'; }
+                else if (b.available <= b.quantity / 3) { statusClass = 'status-low'; statusText = 'Sắp hết'; }
+                else { statusClass = 'status-available'; statusText = 'Còn sách'; }
+                html += `<tr>
+                    <td>#${b.id}</td>
+                    <td>${escapeHtml(b.title)}</span></td>
+                    <td>${cat ? escapeHtml(cat.name) : '-'}</span></td>
+                    <td>${b.isbn || '-'}</span></td>
+                    <td>${b.quantity}</span></td>
+                    <td>${b.available}</span></td>
+                    <td>${b.location || '-'}</span></td>
+                    <td><span class="${statusClass}">${statusText}</span></td>
+                </tr>`;
+            }
+            html += '</tbody></tr>';
+            container.innerHTML = html;
+        }
+
+        function filterBooks() {
+            const kw = document.getElementById('searchInput').value.toLowerCase();
+            const filtered = allBooks.filter(b => b.title.toLowerCase().includes(kw) || (b.isbn && b.isbn.includes(kw)));
+            renderBooksTable(filtered);
+        }
+
+        function escapeHtml(s) { return s ? s.replace(/[&<>]/g, m => m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;') : ''; }
+        function handleLogout() { AuthManager.logout(); window.location.href = 'index.html'; }
+    </script>
+</body>
+</html>

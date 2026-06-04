@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cài đặt - Library Management</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/supabase-client.js"></script>
+    <script src="js/app.js"></script>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">THƯ VIỆN</div>
+        <div class="user-profile">
+            <div class="user-avatar" id="avatarInitial">TV</div>
+            <div class="user-info"><strong id="userName"></strong><small id="userRole"></small></div>
+        </div>
+    </div>
+    <div id="sidebar" class="sidebar"></div>
+    <div class="main-content">
+        <div class="page-title"><h2>⚙️ CÀI ĐẶT</h2></div>
+        <div class="page-shell">
+            <div class="page-card">
+                <div class="settings-container" style="max-width:600px; margin:0 auto;">
+                    <div class="settings-section"><div class="settings-label">Ngôn ngữ :</div><div class="settings-options"><label><input type="radio" name="language" value="vi" checked> Tiếng Việt</label><label><input type="radio" name="language" value="en"> Tiếng Anh</label></div></div>
+                    <div class="settings-section"><div class="settings-label">Giao diện :</div><div class="settings-options"><label><input type="radio" name="theme" value="light" checked> Sáng</label><label><input type="radio" name="theme" value="dark"> Tối</label></div></div>
+                    <div class="settings-section"><div class="settings-label">Đổi mật khẩu :</div><div class="settings-inputs"><input type="password" id="oldPass" placeholder="Mật khẩu cũ"><input type="password" id="newPass" placeholder="Mật khẩu mới"><input type="password" id="confirmPass" placeholder="Xác nhận mật khẩu"><button class="btn btn-primary" onclick="changePassword()">Đổi mật khẩu</button></div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="alert-container"></div>
+    <script>
+        let currentUser = null;
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            currentUser = AuthManager.getCurrentUser();
+            if (!currentUser) { window.location.href = 'index.html'; return; }
+            document.getElementById('userName').innerText = currentUser.full_name;
+            document.getElementById('userRole').innerText = currentUser.role === 'admin' ? 'Admin' : 'Thủ thư';
+            document.getElementById('avatarInitial').innerText = currentUser.full_name.charAt(0).toUpperCase();
+            renderSidebar();
+            loadSettings();
+        });
+
+        function renderSidebar() {
+    const isAdmin = currentUser.role === 'admin';
+    const isLibrarian = currentUser.role === 'librarian';
+    let html = '<h1>MAIN MENU</h1><ul class="nav-menu">';
+    html += '<li class="nav-item"><a href="dashboard.html" class="nav-link">🏠 Trang chủ</a></li>';
+    html += '<li class="nav-item"><a href="FormMuonSach.html" class="nav-link">📘 Mượn sách</a></li>';
+    html += '<li class="nav-item"><a href="FormThemXoaSua.html" class="nav-link">📝 Quản lý sách</a></li>';
+    html += '<li class="nav-item"><a href="FormTraCuuDocGia.html" class="nav-link">🔎 Tra cứu độc giả</a></li>';
+    html += '<li class="nav-item"><a href="FormTraCuuMuonTra.html" class="nav-link">📚 Tra cứu mượn trả</a></li>';
+    html += '<li class="nav-item"><a href="FormTinhTrangTaiLieu.html" class="nav-link">📄 Tình trạng sách</a></li>';
+    html += '<li class="nav-item"><a href="FromTimKiem.html" class="nav-link">🔍 Tìm kiếm</a></li>';
+    
+if (isAdmin) {
+        html += '<li class="nav-item"><a href="statistical.html" class="nav-link">📊 Thống kê</a></li>';
+        html += '<li class="nav-item"><a href="admin_users.html" class="nav-link">👥 Quản lý nhân viên</a></li>';
+        html += '<li class="nav-item"><a href="admin_help_requests.html" class="nav-link">📬 Yêu cầu hỗ trợ</a></li>';
+    html += '<li class="nav-item"><a href="payments.html" class="nav-link">💰 Quản lý thanh toán</a></li>';
+    }
+
+    html += '</ul><h1>HỖ TRỢ</h1><ul>';
+    html += '<li class="nav-item"><a href="settings.html " class="nav-link active">⚙️ Cài đặt</a></li>';
+    if(isLibrarian) {
+        html += '<li class="nav-item"><a href="help.html" class="nav-link">❓ Trợ giúp</a></li>';
+    }
+    html += '<li class="nav-item"><a href="#" onclick="handleLogout()" class="nav-link">🚪 Đăng xuất</a></li></ul>';
+    document.getElementById('sidebar').innerHTML = html;
+}
+
+        function loadSettings() {
+            const settings = JSON.parse(localStorage.getItem('appSettings') || '{}');
+            if (settings.language) document.querySelector(`input[name="language"][value="${settings.language}"]`).checked = true;
+            if (settings.theme) document.querySelector(`input[name="theme"][value="${settings.theme}"]`).checked = true;
+        }
+
+        function saveSettings() {
+            const settings = { language: document.querySelector('input[name="language"]:checked').value, theme: document.querySelector('input[name="theme"]:checked').value };
+            localStorage.setItem('appSettings', JSON.stringify(settings));
+            UIManager.showAlert('Đã lưu cài đặt!', 'success');
+        }
+
+        async function changePassword() {
+            const old = document.getElementById('oldPass').value;
+            const newP = document.getElementById('newPass').value;
+            const confirm = document.getElementById('confirmPass').value;
+            if (!old || !newP || !confirm) return UIManager.showAlert('Nhập đầy đủ mật khẩu', 'error');
+            if (newP !== confirm) return UIManager.showAlert('Mật khẩu mới không khớp', 'error');
+            if (currentUser.password !== old) return UIManager.showAlert('Mật khẩu cũ không đúng', 'error');
+            const { error } = await window.supabaseClient.from('users').update({ password: newP }).eq('id', currentUser.id);
+            if (error) return UIManager.showAlert('Lỗi cập nhật', 'error');
+            currentUser.password = newP;
+            sessionStorage.setItem('library_currentUser', JSON.stringify(currentUser));
+            UIManager.showAlert('Đổi mật khẩu thành công!', 'success');
+            document.getElementById('oldPass').value = ''; document.getElementById('newPass').value = ''; document.getElementById('confirmPass').value = '';
+        }
+
+        
+
+        function handleLogout() { AuthManager.logout(); window.location.href = 'index.html'; }
+    </script>
+</body>
+</html>

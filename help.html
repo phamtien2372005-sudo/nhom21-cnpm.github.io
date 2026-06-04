@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trợ giúp - Library Management</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/supabase-client.js"></script>
+    <script src="js/app.js"></script>
+    <style>
+        .help-container { max-width: 800px; margin: 0 auto; }
+        .request-card { background: #f9f9f9; border-left: 4px solid #00BCD4; padding: 15px; margin-bottom: 20px; border-radius: 8px; }
+        .request-status { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+        .status-pending { background: #FFD93D; color: #856404; }
+        .status-resolved { background: #51CF66; color: white; }
+        .admin-reply { background: #e8f5e9; padding: 10px; border-radius: 8px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">THƯ VIỆN</div>
+        <div class="user-profile">
+            <div class="user-avatar" id="avatarInitial">TV</div>
+            <div class="user-info"><strong id="userName"></strong><small id="userRole"></small></div>
+        </div>
+    </div>
+    <div id="sidebar" class="sidebar"></div>
+    <div class="main-content">
+        <div class="page-title"><h2>❓ TRỢ GIÚP & HỖ TRỢ</h2></div>
+        <div class="page-shell">
+            <div class="page-card">
+                <div class="help-container">
+                    <h3>Gửi yêu cầu hỗ trợ</h3>
+                    <form id="helpForm">
+                        <div class="form-group"><label>Tiêu đề *</label><input type="text" id="subject" class="form-control" required></div>
+                        <div class="form-group"><label>Loại vấn đề *</label>
+                            <select id="category" class="form-control" required>
+                                <option value="">Chọn</option>
+                                <option value="kỹ thuật">Sự cố kỹ thuật</option>
+                                <option value="nghiệp vụ">Hỏi về nghiệp vụ</option>
+                                <option value="khác">Khác</option>
+                            </select>
+                        </div>
+                        <div class="form-group"><label>Nội dung *</label><textarea id="message" rows="5" class="form-control" required></textarea></div>
+                        <button type="submit" class="btn btn-primary">Gửi yêu cầu</button>
+                    </form>
+
+                    <h3 style="margin-top: 40px;">Lịch sử yêu cầu của bạn</h3>
+                    <div id="historyList">Đang tải...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="alert-container"></div>
+    <script>
+        let currentUser = null;
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            currentUser = AuthManager.getCurrentUser();
+            if (!currentUser) { window.location.href = 'index.html'; return; }
+            document.getElementById('userName').innerText = currentUser.full_name;
+            document.getElementById('userRole').innerText = currentUser.role === 'admin' ? 'Admin' : 'Thủ thư';
+            document.getElementById('avatarInitial').innerText = currentUser.full_name.charAt(0).toUpperCase();
+            renderSidebar();
+            await loadHistory();
+        });
+
+        function renderSidebar() {
+    const isAdmin = currentUser.role === 'admin';
+    let html = '<h1>MAIN MENU</h1><ul class="nav-menu">';
+    html += '<li class="nav-item"><a href="dashboard.html" class="nav-link">🏠 Trang chủ</a></li>';
+    html += '<li class="nav-item"><a href="FormMuonSach.html" class="nav-link">📘 Mượn sách</a></li>';
+    html += '<li class="nav-item"><a href="FormThemXoaSua.html" class="nav-link">📝 Quản lý sách</a></li>';
+    html += '<li class="nav-item"><a href="FormTraCuuDocGia.html" class="nav-link">🔎 Tra cứu độc giả</a></li>';
+    html += '<li class="nav-item"><a href="FormTraCuuMuonTra.html" class="nav-link">📚 Tra cứu mượn trả</a></li>';
+    html += '<li class="nav-item"><a href="FormTinhTrangTaiLieu.html" class="nav-link">📄 Tình trạng sách</a></li>';
+    html += '<li class="nav-item"><a href="FromTimKiem.html" class="nav-link">🔍 Tìm kiếm</a></li>';
+    
+    html += '</ul><h1>HỖ TRỢ</h1><ul>';
+    html += '<li class="nav-item"><a href="settings.html " class="nav-link">⚙️ Cài đặt</a></li>';
+    html += '<li class="nav-item"><a href="help.html" class="nav-link active">❓ Trợ giúp</a></li>';
+    html += '<li class="nav-item"><a href="#" onclick="handleLogout()" class="nav-link">🚪 Đăng xuất</a></li></ul>';
+    document.getElementById('sidebar').innerHTML = html;
+}
+
+        document.getElementById('helpForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const subject = document.getElementById('subject').value.trim();
+            const category = document.getElementById('category').value;
+            const message = document.getElementById('message').value.trim();
+            if (!subject || !category || !message) return UIManager.showAlert('Vui lòng điền đầy đủ', 'error');
+            try {
+                await SupabaseDB.addHelpRequest({
+                    userId: currentUser.id,
+                    userName: currentUser.full_name,
+                    subject, category, message
+                });
+                UIManager.showAlert('Yêu cầu đã được gửi!', 'success');
+                document.getElementById('helpForm').reset();
+                await loadHistory();
+            } catch (err) {
+                UIManager.showAlert('Lỗi gửi yêu cầu', 'error');
+            }
+        });
+
+        async function loadHistory() {
+            const requests = await SupabaseDB.getHelpRequestsByUser(currentUser.id);
+            const container = document.getElementById('historyList');
+            if (!requests.length) { container.innerHTML = '<p>Chưa có yêu cầu nào.</p>'; return; }
+            let html = '';
+            for (const r of requests) {
+                const statusClass = r.status === 'pending' ? 'status-pending' : 'status-resolved';
+                const statusText = r.status === 'pending' ? 'Chờ xử lý' : 'Đã xử lý';
+                html += `
+                    <div class="request-card">
+                        <div><strong>${escapeHtml(r.subject)}</strong> <span class="request-status ${statusClass}">${statusText}</span></div>
+                        <div><small>Loại: ${escapeHtml(r.category)} | Ngày: ${new Date(r.created_at).toLocaleString('vi-VN')}</small></div>
+                        <div>${escapeHtml(r.message)}</div>
+                        ${r.admin_reply ? `<div class="admin-reply"><strong>Phản hồi admin:</strong> ${escapeHtml(r.admin_reply)}</div>` : ''}
+                    </div>
+                `;
+            }
+            container.innerHTML = html;
+        }
+
+        function escapeHtml(s) { return s ? s.replace(/[&<>]/g, m=>m==='&'?'&amp;':m==='<'?'&lt;':'&gt;') : ''; }
+        function handleLogout() { AuthManager.logout(); window.location.href='index.html'; }
+    </script>
+</body>
+</html>

@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tra cứu mượn trả - Library Management</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/supabase-client.js"></script>
+    <script src="js/app.js"></script>
+    <style>
+        .status-badge { display: inline-block; padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+        .status-borrowed { background-color: #FFD93D; color: #856404; }
+        .status-returned { background-color: #51CF66; color: white; }
+        .status-late { background-color: #FF6B6B; color: white; }
+        .table-container { overflow-x: auto; margin-top:20px; }
+        table { width:100%; border-collapse:collapse; background:white; }
+        th, td { padding:12px; border-bottom:1px solid #eee; text-align:left; }
+        th { background:#f5f5f5; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">THƯ VIỆN</div>
+        <div class="user-profile">
+            <div class="user-avatar" id="avatarInitial">TV</div>
+            <div class="user-info"><strong id="userName"></strong><small id="userRole"></small></div>
+        </div>
+    </div>
+    <div id="sidebar" class="sidebar"></div>
+    <div class="main-content">
+        <div class="page-title"><h2>📋 TRA CỨU MƯỢN TRẢ</h2></div>
+        <div class="page-shell">
+            <div class="page-card">
+                <div class="page-header"><div><h2>Danh sách phiếu mượn</h2><p class="subtext">Lịch sử mượn trả sách</p></div></div>
+                <div class="form-group"><input type="text" id="searchInput" class="form-control" placeholder="Tìm theo tên độc giả hoặc tên sách..." onkeyup="filterBorrowings()"></div>
+                <div class="table-container"><div id="borrowTable">Đang tải...</div></div>
+            </div>
+        </div>
+    </div>
+    <div id="alert-container"></div>
+    <script>
+        let allBorrowings = [], allReaders = [], allBooks = [], currentUser = null;
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            currentUser = AuthManager.getCurrentUser();
+            if (!currentUser) { window.location.href = 'index.html'; return; }
+            document.getElementById('userName').innerText = currentUser.full_name;
+            document.getElementById('userRole').innerText = currentUser.role === 'admin' ? 'Admin' : 'Thủ thư';
+            document.getElementById('avatarInitial').innerText = currentUser.full_name.charAt(0).toUpperCase();
+            renderSidebar();
+            await loadData();
+        });
+
+        function renderSidebar() {
+    const isAdmin = currentUser.role === 'admin';
+    const isLibrarian = currentUser.role === 'librarian';
+    let html = '<h1>MAIN MENU</h1><ul class="nav-menu">';
+    html += '<li class="nav-item"><a href="dashboard.html" class="nav-link">🏠 Trang chủ</a></li>';
+    html += '<li class="nav-item"><a href="FormMuonSach.html" class="nav-link">📘 Mượn sách</a></li>';
+    html += '<li class="nav-item"><a href="FormThemXoaSua.html" class="nav-link">📝 Quản lý sách</a></li>';
+    html += '<li class="nav-item"><a href="FormTraCuuDocGia.html" class="nav-link">🔎 Tra cứu độc giả</a></li>';
+    html += '<li class="nav-item"><a href="FormTraCuuMuonTra.html" class="nav-link active">📚 Tra cứu mượn trả</a></li>';
+    html += '<li class="nav-item"><a href="FormTinhTrangTaiLieu.html" class="nav-link">📄 Tình trạng sách</a></li>';
+    html += '<li class="nav-item"><a href="FromTimKiem.html" class="nav-link">🔍 Tìm kiếm</a></li>';
+    
+    if (isAdmin) {
+        html += '<li class="nav-item"><a href="statistical.html" class="nav-link">📊 Thống kê</a></li>';
+        html += '<li class="nav-item"><a href="admin_users.html" class="nav-link">👥 Quản lý nhân viên</a></li>';
+        html += '<li class="nav-item"><a href="admin_help_requests.html" class="nav-link">📬 Yêu cầu hỗ trợ</a></li>';
+    html += '<li class="nav-item"><a href="payments.html" class="nav-link">💰 Quản lý thanh toán</a></li>';
+    }
+    
+    html += '</ul><h1>HỖ TRỢ</h1><ul>';
+    html += '<li class="nav-item"><a href="settings.html " class="nav-link">⚙️ Cài đặt</a></li>';
+if(isLibrarian) {
+        html += '<li class="nav-item"><a href="help.html" class="nav-link">❓ Trợ giúp</a></li>';
+    }    html += '<li class="nav-item"><a href="#" onclick="handleLogout()" class="nav-link">🚪 Đăng xuất</a></li></ul>';
+    document.getElementById('sidebar').innerHTML = html;
+}
+
+        async function loadData() {
+            allBorrowings = await SupabaseDB.getBorrowing();
+            allReaders = await SupabaseDB.getReaders();
+            allBooks = await SupabaseDB.getBooks();
+            renderBorrowTable(allBorrowings);
+        }
+
+        function renderBorrowTable(borrowings) {
+            const container = document.getElementById('borrowTable');
+            if (!borrowings.length) { container.innerHTML = '<div style="text-align:center;padding:40px;">Chưa có phiếu mượn</div>'; return; }
+            let html = `<table><thead><tr><th>Độc giả</th><th>Sách</th><th>Ngày mượn</th><th>Hạn trả</th><th>Ngày trả</th><th>Trạng thái</th><th>Ghi chú</th></tr></thead><tbody>`;
+            for (const b of borrowings) {
+                const reader = allReaders.find(r => r.id == b.reader_id);
+                const book = allBooks.find(bk => bk.id == b.book_id);
+                const isLate = !b.return_date && new Date(b.due_date) < new Date();
+                let statusHtml = b.return_date ? '<span class="status-badge status-returned">Đã trả</span>' : `<span class="status-badge ${isLate ? 'status-late' : 'status-borrowed'}">${isLate ? 'Quá hạn' : 'Đang mượn'}</span>`;
+                html += `<tr>
+                    <td>${reader ? escapeHtml(reader.full_name) : '?'}</td>
+                    <td>${book ? escapeHtml(book.title) : '?'}</td>
+                    <td>${formatDate(b.borrow_date)}</span></td>
+                    <td>${formatDate(b.due_date)}</span></td>
+                    <td>${b.return_date ? formatDate(b.return_date) : '-'}</span></td>
+                    <td>${statusHtml}</span></td>
+                    <td>${b.notes || '-'}</span><tr>
+                `;
+            }
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        }
+
+        function filterBorrowings() {
+            const kw = document.getElementById('searchInput').value.toLowerCase();
+            const filtered = allBorrowings.filter(b => {
+                const reader = allReaders.find(r => r.id == b.reader_id);
+                const book = allBooks.find(bk => bk.id == b.book_id);
+                return (reader?.full_name || '').toLowerCase().includes(kw) || (book?.title || '').toLowerCase().includes(kw);
+            });
+            renderBorrowTable(filtered);
+        }
+
+        function formatDate(d) { return d ? new Date(d).toLocaleDateString('vi-VN') : '-'; }
+        function escapeHtml(s) { return s ? s.replace(/[&<>]/g, m => m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;') : ''; }
+        function handleLogout() { AuthManager.logout(); window.location.href = 'index.html'; }
+    </script>
+</body>
+</html>

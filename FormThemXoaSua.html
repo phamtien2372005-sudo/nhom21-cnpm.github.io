@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quản lý sách - Library Management</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/supabase-client.js"></script>
+    <script src="js/app.js"></script>
+    <style>
+        .status-available { color: green; font-weight: bold; }
+        .status-borrowed { color: red; font-weight: bold; }
+        .search-box { position: relative; }
+        .search-results { position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #ddd; border-top: none; max-height: 200px; overflow-y: auto; z-index: 1000; display: none; }
+        .search-result-item { padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #f0f0f0; }
+        .search-result-item:hover { background-color: #f5f5f5; }
+        .new-tag { background: #e3f2fd; color: #0d47a1; font-size: 11px; padding: 2px 6px; border-radius: 4px; margin-left: 10px; }
+        .table-container { overflow-x: auto; margin-top:20px; }
+        table { width: 100%; border-collapse: collapse; background: white; }
+        th, td { padding: 12px; border-bottom: 1px solid #eee; text-align: left; }
+        th { background: #f5f5f5; }
+        .btn-sm { padding: 5px 12px; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">THƯ VIỆN</div>
+        <div class="user-profile">
+            <div class="user-avatar" id="avatarInitial">TV</div>
+            <div class="user-info"><strong id="userName"></strong><small id="userRole"></small></div>
+        </div>
+    </div>
+    <div id="sidebar" class="sidebar"></div>
+    <div class="main-content">
+        <div class="page-title"><h2>📚 QUẢN LÝ SÁCH</h2></div>
+        <div class="page-shell">
+            <div class="page-card">
+                <div class="page-header">
+                    <div><h2>Danh sách tài liệu</h2><p class="subtext">Thêm, sửa, xóa sách</p></div>
+                    <button class="btn btn-primary" onclick="openAddBookModal()">+ Thêm sách mới</button>
+                </div>
+                <div class="table-container"><div id="booksTable">Đang tải...</div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal thêm/sửa sách -->
+    <div id="bookModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header"><h2 id="modalTitle">Thêm sách mới</h2><button class="modal-close" onclick="closeBookModal()">&times;</button></div>
+            <form id="bookForm">
+                <div class="form-group"><label>Tiêu đề sách *</label><input type="text" id="bookTitle" class="form-control" required></div>
+                <div class="form-group">
+                    <label>Tác giả *</label>
+                    <div class="search-box">
+                        <input type="text" id="authorSearch" class="form-control" placeholder="Tìm hoặc thêm tác giả mới..." autocomplete="off">
+                        <div id="authorResults" class="search-results"></div>
+                    </div>
+                    <input type="hidden" id="authorId">
+                </div>
+                <div class="form-group"><label>Thể loại *</label><select id="categoryId" class="form-control" required></select></div>
+                <div class="card-row">
+                    <div class="form-group"><label>Nhà xuất bản</label><input type="text" id="publisher" class="form-control"></div>
+                    <div class="form-group"><label>Năm xuất bản</label><select id="year" class="form-control"></select></div>
+                </div>
+                <div class="card-row">
+                    <div class="form-group"><label>Mã ISBN *</label><input type="text" id="isbn" class="form-control" required></div>
+                    <div class="form-group"><label>Số lượng *</label><input type="number" id="quantity" class="form-control" required min="0"></div>
+                </div>
+                <div class="form-group"><label>Vị trí</label><input type="text" id="location" class="form-control" placeholder="Kệ sách"></div>
+                <div class="modal-footer"><button type="button" class="btn btn-secondary" onclick="closeBookModal()">Hủy</button><button type="submit" class="btn btn-primary">Lưu lại</button></div>
+            </form>
+        </div>
+    </div>
+
+    <div id="alert-container"></div>
+    <script>
+        let currentEditId = null, allAuthors = [], allCategories = [], currentUser = null;
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            currentUser = AuthManager.getCurrentUser();
+            if (!currentUser) { window.location.href = 'index.html'; return; }
+            document.getElementById('userName').innerText = currentUser.full_name;
+            document.getElementById('userRole').innerText = currentUser.role === 'admin' ? 'Admin' : 'Thủ thư';
+            document.getElementById('avatarInitial').innerText = currentUser.full_name.charAt(0).toUpperCase();
+            renderSidebar();
+            await loadCategories();
+            await loadAuthors();
+            await loadBooks();
+            setupYearSelect();
+            setupAuthorSearch();
+        });
+
+        function renderSidebar() {
+    const isAdmin = currentUser.role === 'admin';
+    const isLibrarian = currentUser.role === 'librarian';
+    let html = '<h1>MAIN MENU</h1><ul class="nav-menu">';
+    html += '<li class="nav-item"><a href="dashboard.html" class="nav-link">🏠 Trang chủ</a></li>';
+    html += '<li class="nav-item"><a href="FormMuonSach.html" class="nav-link">📘 Mượn sách</a></li>';
+    html += '<li class="nav-item"><a href="FormThemXoaSua.html" class="nav-link active">📝 Quản lý sách</a></li>';
+    html += '<li class="nav-item"><a href="FormTraCuuDocGia.html" class="nav-link">🔎 Tra cứu độc giả</a></li>';
+    html += '<li class="nav-item"><a href="FormTraCuuMuonTra.html" class="nav-link">📚 Tra cứu mượn trả</a></li>';
+    html += '<li class="nav-item"><a href="FormTinhTrangTaiLieu.html" class="nav-link">📄 Tình trạng sách</a></li>';
+    html += '<li class="nav-item"><a href="FromTimKiem.html" class="nav-link">🔍 Tìm kiếm</a></li>';
+    
+    if (isAdmin) {
+        html += '<li class="nav-item"><a href="statistical.html" class="nav-link">📊 Thống kê</a></li>';
+        html += '<li class="nav-item"><a href="admin_users.html" class="nav-link">👥 Quản lý nhân viên</a></li>';
+        html += '<li class="nav-item"><a href="admin_help_requests.html" class="nav-link">📬 Yêu cầu hỗ trợ</a></li>';
+    html += '<li class="nav-item"><a href="payments.html" class="nav-link">💰 Quản lý thanh toán</a></li>';
+    }
+    
+    html += '</ul><h1>HỖ TRỢ</h1><ul>';
+    html += '<li class="nav-item"><a href="settings.html " class="nav-link">⚙️ Cài đặt</a></li>';
+if(isLibrarian) {
+        html += '<li class="nav-item"><a href="help.html" class="nav-link">❓ Trợ giúp</a></li>';
+    }    
+    html += '<li class="nav-item"><a href="#" onclick="handleLogout()" class="nav-link">🚪 Đăng xuất</a></li></ul>';
+    document.getElementById('sidebar').innerHTML = html;
+}
+
+        async function loadCategories() {
+            allCategories = await SupabaseDB.getCategories();
+            const select = document.getElementById('categoryId');
+            select.innerHTML = '<option value="">Chọn thể loại</option>';
+            allCategories.forEach(c => select.innerHTML += `<option value="${c.id}">${escapeHtml(c.name)}</option>`);
+        }
+        async function loadAuthors() { allAuthors = await SupabaseDB.getAuthors(); }
+        async function loadBooks() {
+            const books = await SupabaseDB.getBooks();
+            const borrowings = await SupabaseDB.getBorrowing();
+            const container = document.getElementById('booksTable');
+            if (!books.length) { container.innerHTML = '<div style="text-align:center;padding:40px;">Chưa có sách</div>'; return; }
+            let html = `<table><thead><tr><th>Mã</th><th>Tiêu đề</th><th>Tác giả</th><th>Thể loại</th><th>ISBN</th><th>Số lượng</th><th>Còn lại</th><th>Hành động</th></tr></thead><tbody>`;
+            for (const b of books) {
+                const author = allAuthors.find(a => a.id == b.author_id);
+                const cat = allCategories.find(c => c.id == b.category_id);
+                const borrowed = borrowings.filter(br => br.book_id == b.id && !br.return_date).length;
+                const available = b.quantity - borrowed;
+                html += `<tr>
+                    <td>#${b.id}</td>
+                    <td><strong>${escapeHtml(b.title)}</strong></td>
+                    <td>${author ? escapeHtml(author.name) : '?'}</td>
+                    <td>${cat ? escapeHtml(cat.name) : '-'}</td>
+                    <td>${b.isbn || '-'}</td>
+                    <td>${b.quantity}</td>
+                    <td class="${available > 0 ? 'status-available' : 'status-borrowed'}">${available}</td>
+                    <td><button class="btn-sm btn-primary" onclick="editBook(${b.id})">Sửa</button> <button class="btn-sm btn-danger" onclick="deleteBook(${b.id})">Xóa</button></td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        }
+        function setupYearSelect() {
+            const yearSelect = document.getElementById('year');
+            const current = new Date().getFullYear();
+            yearSelect.innerHTML = '<option value="">Chọn năm</option>';
+            for (let y = current; y >= 1900; y--) yearSelect.innerHTML += `<option value="${y}">${y}</option>`;
+        }
+        function setupAuthorSearch() {
+            const input = document.getElementById('authorSearch'), results = document.getElementById('authorResults'), hidden = document.getElementById('authorId');
+            async function search(keyword) {
+                if (!keyword.trim()) { results.style.display = 'none'; return; }
+                const filtered = allAuthors.filter(a => a.name.toLowerCase().includes(keyword.toLowerCase()));
+                results.innerHTML = '';
+                filtered.forEach(a => {
+                    const div = document.createElement('div'); div.className = 'search-result-item';
+                    div.innerHTML = `<span>${escapeHtml(a.name)}</span>`;
+                    div.onclick = () => { input.value = a.name; hidden.value = a.id; results.style.display = 'none'; };
+                    results.appendChild(div);
+                });
+                if (!filtered.some(a => a.name.toLowerCase() === keyword.toLowerCase())) {
+                    const div = document.createElement('div'); div.className = 'search-result-item';
+                    div.innerHTML = `<span>✨ Thêm mới: "<strong>${escapeHtml(keyword)}</strong>"</span> <span class="new-tag">Tạo mới</span>`;
+                    div.onclick = async () => {
+                        const newAuthor = await SupabaseDB.addAuthor({ name: keyword, biography: '', birthDate: '', country: '' });
+                        allAuthors.push(newAuthor);
+                        input.value = newAuthor.name; hidden.value = newAuthor.id;
+                        results.style.display = 'none';
+                        UIManager.showAlert(`Đã thêm tác giả: ${newAuthor.name}`, 'success');
+                    };
+                    results.appendChild(div);
+                }
+                results.style.display = 'block';
+            }
+            input.addEventListener('input', () => search(input.value));
+            input.addEventListener('click', () => search(input.value));
+            document.addEventListener('click', (e) => { if (!input.contains(e.target) && !results.contains(e.target)) results.style.display = 'none'; });
+        }
+        function openAddBookModal() { currentEditId = null; document.getElementById('modalTitle').innerText = 'Thêm sách mới'; document.getElementById('bookForm').reset(); document.getElementById('authorId').value = ''; document.getElementById('authorSearch').value = ''; UIManager.showModal(document.getElementById('bookModal'), true); }
+        function closeBookModal() { UIManager.showModal(document.getElementById('bookModal'), false); }
+        document.getElementById('bookForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const authorName = document.getElementById('authorSearch').value.trim();
+            let authorId = document.getElementById('authorId').value;
+            if (!authorName) return UIManager.showAlert('Nhập tên tác giả', 'error');
+            if (!authorId) {
+                let existing = allAuthors.find(a => a.name.toLowerCase() === authorName.toLowerCase());
+                if (existing) authorId = existing.id;
+                else {
+                    const newAuthor = await SupabaseDB.addAuthor({ name: authorName, biography: '', birthDate: '', country: '' });
+                    allAuthors.push(newAuthor);
+                    authorId = newAuthor.id;
+                }
+                document.getElementById('authorId').value = authorId;
+            }
+            const qty = parseInt(document.getElementById('quantity').value) || 0;
+            const bookData = {
+                title: document.getElementById('bookTitle').value.trim(),
+                authorId: parseInt(authorId),
+                categoryId: parseInt(document.getElementById('categoryId').value),
+                publisher: document.getElementById('publisher').value.trim(),
+                year: parseInt(document.getElementById('year').value) || null,
+                isbn: document.getElementById('isbn').value.trim(),
+                quantity: qty,
+                location: document.getElementById('location').value.trim()
+            };
+            if (!bookData.title || !bookData.categoryId || !bookData.isbn || qty <= 0) return UIManager.showAlert('Điền đủ thông tin', 'error');
+            try {
+                if (currentEditId) {
+                    const old = await SupabaseDB.getBookById(currentEditId);
+                    bookData.available = (old.available || old.quantity) + (qty - old.quantity);
+                    if (bookData.available < 0) bookData.available = 0;
+                    await SupabaseDB.updateBook(currentEditId, bookData);
+                    UIManager.showAlert('Cập nhật thành công!', 'success');
+                } else {
+                    await SupabaseDB.addBook(bookData);
+                    UIManager.showAlert('Thêm sách thành công!', 'success');
+                }
+                closeBookModal(); await loadBooks(); await loadAuthors();
+            } catch (err) { UIManager.showAlert('Lỗi: ' + err.message, 'error'); }
+        });
+        async function editBook(id) {
+            const book = await SupabaseDB.getBookById(id);
+            if (!book) return;
+            currentEditId = id;
+            document.getElementById('modalTitle').innerText = 'Sửa sách';
+            document.getElementById('bookTitle').value = book.title;
+            document.getElementById('categoryId').value = book.category_id;
+            document.getElementById('publisher').value = book.publisher || '';
+            document.getElementById('year').value = book.year || '';
+            document.getElementById('isbn').value = book.isbn;
+            document.getElementById('quantity').value = book.quantity;
+            document.getElementById('location').value = book.location || '';
+            const author = allAuthors.find(a => a.id == book.author_id);
+            if (author) { document.getElementById('authorSearch').value = author.name; document.getElementById('authorId').value = author.id; }
+            UIManager.showModal(document.getElementById('bookModal'), true);
+        }
+        async function deleteBook(id) { if (confirm('Xóa sách này?')) { await SupabaseDB.deleteBook(id); await loadBooks(); UIManager.showAlert('Xóa thành công!', 'success'); } }
+        function escapeHtml(s) { return s ? s.replace(/[&<>]/g, m => m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;') : ''; }
+        function handleLogout() { AuthManager.logout(); window.location.href = 'index.html'; }
+    </script>
+</body>
+</html>

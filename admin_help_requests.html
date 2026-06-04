@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quản lý yêu cầu hỗ trợ - Library Management</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/supabase-client.js"></script>
+    <script src="js/app.js"></script>
+    <style>
+        .request-card { background: white; border: 1px solid #ddd; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+        .request-status { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+        .status-pending { background: #FFD93D; color: #856404; }
+        .status-resolved { background: #51CF66; color: white; }
+        .reply-textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px; margin-top: 8px; }
+        .btn-sm { padding: 5px 12px; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">THƯ VIỆN</div>
+        <div class="user-profile">
+            <div class="user-avatar" id="avatarInitial">AD</div>
+            <div class="user-info"><strong id="userName">Admin</strong><small id="userRole">Admin</small></div>
+        </div>
+    </div>
+    <div id="sidebar" class="sidebar"></div>
+    <div class="main-content">
+        <div class="page-title"><h2>📬 YÊU CẦU HỖ TRỢ</h2></div>
+        <div class="page-shell">
+            <div class="page-card">
+                <div id="requestsList">Đang tải...</div>
+            </div>
+        </div>
+    </div>
+    <div id="alert-container"></div>
+    <script>
+        let currentUser = null;
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            currentUser = AuthManager.getCurrentUser();
+            if (!currentUser || currentUser.role !== 'admin') { window.location.href = 'dashboard.html'; return; }
+            document.getElementById('userName').innerText = currentUser.full_name;
+            document.getElementById('userRole').innerText = 'Admin';
+            document.getElementById('avatarInitial').innerText = currentUser.full_name.charAt(0).toUpperCase();
+            renderSidebar();
+            await loadRequests();
+        });
+
+        function renderSidebar() {
+    const isAdmin = currentUser.role === 'admin';
+    let html = '<h1>MAIN MENU</h1><ul class="nav-menu">';
+    html += '<li class="nav-item"><a href="dashboard.html" class="nav-link">🏠 Trang chủ</a></li>';
+    html += '<li class="nav-item"><a href="FormMuonSach.html" class="nav-link">📘 Mượn sách</a></li>';
+    html += '<li class="nav-item"><a href="FormThemXoaSua.html" class="nav-link">📝 Quản lý sách</a></li>';
+    html += '<li class="nav-item"><a href="FormTraCuuDocGia.html" class="nav-link">🔎 Tra cứu độc giả</a></li>';
+    html += '<li class="nav-item"><a href="FormTraCuuMuonTra.html" class="nav-link">📚 Tra cứu mượn trả</a></li>';
+    html += '<li class="nav-item"><a href="FormTinhTrangTaiLieu.html" class="nav-link">📄 Tình trạng sách</a></li>';
+    html += '<li class="nav-item"><a href="FromTimKiem.html" class="nav-link">🔍 Tìm kiếm</a></li>';
+    
+        html += '<li class="nav-item"><a href="statistical.html" class="nav-link">📊 Thống kê</a></li>';
+        html += '<li class="nav-item"><a href="admin_users.html" class="nav-link">👥 Quản lý nhân viên</a></li>';
+        html += '<li class="nav-item"><a href="admin_help_requests.html" class="nav-link active">📬 Yêu cầu hỗ trợ</a></li>';
+html += '<li class="nav-item"><a href="payments.html" class="nav-link">💰 Quản lý thanh toán</a></li>';
+    html += '</ul><h1>HỖ TRỢ</h1><ul>';
+    html += '<li class="nav-item"><a href="settings.html " class="nav-link">⚙️ Cài đặt</a></li>';
+    html += '<li class="nav-item"><a href="#" onclick="handleLogout()" class="nav-link">🚪 Đăng xuất</a></li></ul>';
+    document.getElementById('sidebar').innerHTML = html;
+}
+
+        async function loadRequests() {
+            const requests = await SupabaseDB.getAllHelpRequests();
+            const container = document.getElementById('requestsList');
+            if (!requests.length) { container.innerHTML = '<p>Chưa có yêu cầu nào.</p>'; return; }
+            let html = '';
+            for (const r of requests) {
+                const statusClass = r.status === 'pending' ? 'status-pending' : 'status-resolved';
+                const statusText = r.status === 'pending' ? 'Chờ xử lý' : 'Đã xử lý';
+                html += `
+                    <div class="request-card" data-id="${r.id}">
+                        <div><strong>${escapeHtml(r.subject)}</strong> <span class="request-status ${statusClass}">${statusText}</span></div>
+                        <div><small>Người gửi: ${escapeHtml(r.user_name)} | Loại: ${escapeHtml(r.category)} | Ngày: ${new Date(r.created_at).toLocaleString('vi-VN')}</small></div>
+                        <div><strong>Nội dung:</strong> ${escapeHtml(r.message)}</div>
+                        ${r.admin_reply ? `<div class="admin-reply-box" style="margin-top:10px;"><strong>Phản hồi đã gửi:</strong> ${escapeHtml(r.admin_reply)}</div>` : ''}
+                        <div style="margin-top:15px;">
+                            <textarea id="reply-${r.id}" class="reply-textarea" rows="2" placeholder="Nhập phản hồi..."></textarea>
+                            <button class="btn btn-sm btn-primary" onclick="replyRequest(${r.id})">Gửi phản hồi & đánh dấu đã xử lý</button>
+                        </div>
+                    </div>
+                `;
+            }
+            container.innerHTML = html;
+        }
+
+        async function replyRequest(id) {
+            const reply = document.getElementById(`reply-${id}`).value.trim();
+            if (!reply) return UIManager.showAlert('Vui lòng nhập phản hồi', 'error');
+            try {
+                await SupabaseDB.updateHelpRequestStatus(id, 'resolved', reply);
+                UIManager.showAlert('Phản hồi đã gửi!', 'success');
+                await loadRequests();
+            } catch (err) {
+                UIManager.showAlert('Lỗi gửi phản hồi', 'error');
+            }
+        }
+
+        function escapeHtml(s) { return s ? s.replace(/[&<>]/g, m=>m==='&'?'&amp;':m==='<'?'&lt;':'&gt;') : ''; }
+        function handleLogout() { AuthManager.logout(); window.location.href='index.html'; }
+    </script>
+</body>
+</html>

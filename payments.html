@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Quản lý thanh toán - Library Management</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/supabase-client.js"></script>
+    <script src="js/app.js"></script>
+    <style>
+        .stats { background: #f0f0f0; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .stat-number { font-size: 28px; font-weight: bold; color: #00BCD4; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px; border-bottom: 1px solid #ddd; }
+        .btn-sm { padding: 4px 10px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">THƯ VIỆN</div>
+        <div class="user-profile">
+            <div class="user-avatar" id="avatarInitial">TV</div>
+            <div class="user-info"><strong id="userName"></strong><small id="userRole"></small></div>
+        </div>
+    </div>
+    <div id="sidebar" class="sidebar"></div>
+    <div class="main-content">
+        <div class="page-title"><h2>💰 QUẢN LÝ THANH TOÁN</h2></div>
+        <div class="page-shell">
+            <div class="page-card">
+                <div class="stats">
+                    <h3>Doanh thu</h3>
+                    <div>Tổng: <span id="totalRevenue">0</span> VNĐ</div>
+                    <div id="monthlyStats"></div>
+                </div>
+                <h3>Lịch sử thanh toán</h3>
+                <div class="table-container">
+                    <table id="paymentsTable">
+                        <thead><tr><th>ID</th><th>Độc giả</th><th>Sách</th><th>Số tiền</th><th>Phương thức</th><th>Ngày thanh toán</th><th>Ghi chú</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="alert-container"></div>
+    <script>
+        let currentUser = null;
+        document.addEventListener('DOMContentLoaded', async () => {
+            currentUser = AuthManager.getCurrentUser();
+            if (!currentUser || currentUser.role !== 'admin') window.location.href = 'dashboard.html';
+            document.getElementById('userName').innerText = currentUser.full_name;
+            document.getElementById('userRole').innerText = 'Admin';
+            document.getElementById('avatarInitial').innerText = currentUser.full_name.charAt(0).toUpperCase();
+            renderSidebar();
+            await loadStats();
+            await loadPayments();
+        });
+
+        async function loadStats() {
+            const { total, monthly } = await SupabaseDB.getRevenueStats();
+            document.getElementById('totalRevenue').innerText = total.toLocaleString();
+            let html = '<h4>Theo tháng:</h4><ul>';
+            for (const [month, amount] of Object.entries(monthly)) {
+                html += `<li>${month}: ${amount.toLocaleString()} VNĐ</li>`;
+            }
+            html += '</ul>';
+            document.getElementById('monthlyStats').innerHTML = html;
+        }
+
+        async function loadPayments() {
+            const payments = await SupabaseDB.getAllFees(); // lấy tất cả payments
+            const tbody = document.querySelector('#paymentsTable tbody');
+            tbody.innerHTML = '';
+            payments.forEach(p => {
+                const row = tbody.insertRow();
+                row.innerHTML = `
+                    <td>${p.id}</td>
+                    <td>${p.readers?.full_name || '?'}</td>
+                    <td>${p.borrowing?.books?.title || 'N/A'}</td>
+                    <td>${p.amount.toLocaleString()} VNĐ</td>
+                    <td>${p.payment_method === 'cash' ? 'Tiền mặt' : 'Chuyển khoản'}</td>
+                    <td>${new Date(p.payment_date).toLocaleString('vi-VN')}</td>
+                    <td>${p.notes || '-'}</td>
+                `;
+            });
+            if (payments.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">Chưa có giao dịch thanh toán nào</td></tr>';
+            }
+        }
+
+        function renderSidebar() {
+            const isAdmin = true;
+            let html = '<h1>MAIN MENU</h1><ul class="nav-menu">';
+            html += '<li class="nav-item"><a href="dashboard.html" class="nav-link">🏠 Trang chủ</a></li>';
+            html += '<li class="nav-item"><a href="FormMuonSach.html" class="nav-link">📘 Mượn sách</a></li>';
+            html += '<li class="nav-item"><a href="FormThemXoaSua.html" class="nav-link">📝 Quản lý sách</a></li>';
+            html += '<li class="nav-item"><a href="FormTraCuuDocGia.html" class="nav-link">🔎 Tra cứu độc giả</a></li>';
+            html += '<li class="nav-item"><a href="FormTraCuuMuonTra.html" class="nav-link">📚 Tra cứu mượn trả</a></li>';
+            html += '<li class="nav-item"><a href="FormTinhTrangTaiLieu.html" class="nav-link">📄 Tình trạng sách</a></li>';
+            html += '<li class="nav-item"><a href="FromTimKiem.html" class="nav-link">🔍 Tìm kiếm</a></li>';
+            html += '<li class="nav-item"><a href="statistical.html" class="nav-link">📊 Thống kê</a></li>';
+            html += '<li class="nav-item"><a href="admin_users.html" class="nav-link">👥 Quản lý nhân viên</a></li>';
+            html += '<li class="nav-item"><a href="admin_help_requests.html" class="nav-link">📬 Yêu cầu hỗ trợ</a></li>';
+            html += '<li class="nav-item"><a href="payments.html" class="nav-link active">💰 Quản lý thanh toán</a></li>';
+            html += '</ul><h1>HỖ TRỢ</h1><ul>';
+            html += '<li class="nav-item"><a href="settings.html" class="nav-link">⚙️ Cài đặt</a></li>';
+            html += '<li class="nav-item"><a href="#" onclick="handleLogout()" class="nav-link">🚪 Đăng xuất</a></li></ul>';
+            document.getElementById('sidebar').innerHTML = html;
+        }
+
+        function handleLogout() { AuthManager.logout(); window.location.href = 'index.html'; }
+    </script>
+</body>
+</html>
