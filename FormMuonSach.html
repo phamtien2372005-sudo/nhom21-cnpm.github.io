@@ -141,12 +141,21 @@
                 container.innerHTML = '<div style="text-align:center;padding:40px;">📭 Chưa có phiếu mượn nào</div>';
                 return;
             }
+            // Kiểm tra quyền: chỉ admin mới được xóa
+            const isAdmin = currentUser.role === 'admin';
             let html = `<table class="borrow-table"><thead><tr><th>Độc giả</th><th>Sách</th><th>Ngày mượn</th><th>Hạn trả</th><th>Trạng thái</th><th>Ghi chú</th><th>Hành động</th></tr></thead><tbody>`;
             for (const b of allBorrowings) {
                 const reader = allReaders.find(r => r.id == b.reader_id);
                 const book = allBooks.find(bk => bk.id == b.book_id);
                 const isLate = !b.return_date && new Date(b.due_date) < new Date();
                 let statusHtml = b.return_date ? '<span class="status-badge status-returned">✅ Đã trả</span>' : `<span class="status-badge ${isLate ? 'status-late' : 'status-borrowed'}">${isLate ? '⚠️ Quá hạn' : '📖 Đang mượn'}</span>`;
+                // Hành động: nút trả sách (luôn có) và nút xóa (chỉ admin)
+                let actionHtml = !b.return_date ? `<button class="btn-sm btn-primary" onclick="returnBook('${b.id}')">🔄 Trả sách</button>` : '';
+                if (isAdmin) {
+                    actionHtml += ` <button class="btn-sm btn-danger" onclick="deleteBorrow('${b.id}')">🗑️ Xóa</button>`;
+                } else {
+                    actionHtml += ` <span class="text-muted" style="font-size:12px;">(Chỉ admin xóa)</span>`;
+                }
                 html += `<tr>
                     <td><strong>${reader ? escapeHtml(reader.full_name) : '?'}</strong> <span style="color:#999;">(#${b.reader_id})</span></td>
                     <td>${book ? escapeHtml(book.title) : '?'}</td>
@@ -154,7 +163,7 @@
                     <td>${formatDate(b.due_date)}</td>
                     <td>${statusHtml}</td>
                     <td>${b.notes || '-'}</td>
-                    <td>${!b.return_date ? `<button class="btn-sm btn-primary" onclick="returnBook('${b.id}')">🔄 Trả sách</button>` : ''}<button class="btn-sm btn-danger" onclick="deleteBorrow('${b.id}')">🗑️ Xóa</button></td>
+                    <td>${actionHtml}</td>
                 </tr>`;
             }
             container.innerHTML = html + '</tbody></table>';
@@ -198,9 +207,7 @@
                 UIManager.showAlert('Vui lòng chọn đầy đủ độc giả và sách', 'error');
                 return;
             }
-            // Lưu thông tin tạm
             pendingBorrowData = { readerId, bookId, borrowDate, dueDate, notes };
-            // Hỏi thanh toán phí mượn sách (ví dụ 10000đ)
             currentPaymentAmount = 10000;
             document.getElementById('paymentAmount').innerText = currentPaymentAmount.toLocaleString() + 'đ';
             selectedMethod = 'cash';
@@ -215,9 +222,7 @@
             const method = selectedMethod;
             const notes = document.getElementById('paymentNotes').value;
             try {
-                // Tạo phiếu mượn
                 const newBorrow = await SupabaseDB.addBorrowing(pendingBorrowData);
-                // Ghi nhận thanh toán
                 await SupabaseDB.recordPayment({
                     borrowingId: newBorrow.id,
                     readerId: pendingBorrowData.readerId,
@@ -228,7 +233,6 @@
                 UIManager.showAlert('Mượn sách và thanh toán thành công!', 'success');
                 closePaymentModal(false);
                 await refreshAllData();
-                // Reset form
                 document.getElementById('borrowForm').reset();
                 setupDateDefaults();
                 document.getElementById('readerId').value = '';
@@ -242,19 +246,17 @@
         function closePaymentModal(isCancel = false) {
             UIManager.showModal(document.getElementById('paymentModal'), false);
             if (isCancel) {
-                // Hủy bỏ, không tạo phiếu mượn
                 pendingBorrowData = null;
                 UIManager.showAlert('Đã hủy mượn sách', 'info');
             }
         }
 
-        // Trả sách (giữ nguyên như cũ, có thể có phạt)
+        // Trả sách
         async function returnBook(borrowId) {
             const today = new Date().toISOString().split('T')[0];
             try {
                 const result = await SupabaseDB.returnBook(borrowId, { returnDate: today, returnCondition: 'good', returnNotes: '' });
                 if (result.lateFee > 0) {
-                    // Nếu có phạt, hỏi thanh toán (có thể dùng modal tương tự)
                     if (confirm(`Sách trả quá hạn. Phí phạt: ${result.lateFee.toLocaleString()}đ. Bạn có muốn thanh toán ngay?`)) {
                         await SupabaseDB.recordPayment({
                             borrowingId: borrowId,
@@ -276,7 +278,12 @@
             }
         }
 
+        // Xóa phiếu mượn - chỉ admin mới được gọi (nút đã ẩn với thủ thư)
         async function deleteBorrow(borrowId) {
+            if (currentUser.role !== 'admin') {
+                UIManager.showAlert('Bạn không có quyền xóa phiếu mượn!', 'error');
+                return;
+            }
             if (!confirm('Xóa phiếu mượn này sẽ không thể khôi phục. Bạn chắc chắn?')) return;
             try {
                 await SupabaseDB.deleteBorrowing(borrowId);
@@ -322,33 +329,30 @@
         function formatDate(d) { return d ? new Date(d).toLocaleDateString('vi-VN') : '-'; }
         function escapeHtml(s) { return s ? s.replace(/[&<>]/g, m => m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;') : ''; }
         function handleLogout() { AuthManager.logout(); window.location.href = 'index.html'; }
+
         function renderSidebar() {
-    const isAdmin = currentUser.role === 'admin';
-    const isLibrarian = currentUser.role === 'librarian';
-    let html = '<h1>MAIN MENU</h1><ul class="nav-menu">';
-    html += '<li class="nav-item"><a href="dashboard.html" class="nav-link">🏠 Trang chủ</a></li>';
-    html += '<li class="nav-item"><a href="FormMuonSach.html" class="nav-link active">📘 Mượn sách</a></li>';
-    html += '<li class="nav-item"><a href="FormThemXoaSua.html" class="nav-link">📝 Quản lý sách</a></li>';
-    html += '<li class="nav-item"><a href="FormTraCuuDocGia.html" class="nav-link">🔎 Tra cứu độc giả</a></li>';
-    html += '<li class="nav-item"><a href="FormTraCuuMuonTra.html" class="nav-link">📚 Tra cứu mượn trả</a></li>';
-    html += '<li class="nav-item"><a href="FormTinhTrangTaiLieu.html" class="nav-link">📄 Tình trạng sách</a></li>';
-    html += '<li class="nav-item"><a href="FromTimKiem.html" class="nav-link">🔍 Tìm kiếm</a></li>';
-    
-    if (isAdmin) {
-        html += '<li class="nav-item"><a href="statistical.html" class="nav-link">📊 Thống kê</a></li>';
-        html += '<li class="nav-item"><a href="admin_users.html" class="nav-link">👥 Quản lý nhân viên</a></li>';
-        html += '<li class="nav-item"><a href="admin_help_requests.html" class="nav-link">📬 Yêu cầu hỗ trợ</a></li>';
-    html += '<li class="nav-item"><a href="payments.html" class="nav-link">💰 Quản lý thanh toán</a></li>';
-    }
-    
-    html += '</ul><h1>HỖ TRỢ</h1><ul>';
-    html += '<li class="nav-item"><a href="settings.html " class="nav-link">⚙️ Cài đặt</a></li>';
-if(isLibrarian) {
-        html += '<li class="nav-item"><a href="help.html" class="nav-link">❓ Trợ giúp</a></li>';
-    }    
-    html += '<li class="nav-item"><a href="#" onclick="handleLogout()" class="nav-link">🚪 Đăng xuất</a></li></ul>';
-    document.getElementById('sidebar').innerHTML = html;
-}
+            const isAdmin = currentUser.role === 'admin';
+            const isLibrarian = currentUser.role === 'librarian';
+            let html = '<h1>MAIN MENU</h1><ul class="nav-menu">';
+            html += '<li class="nav-item"><a href="dashboard.html" class="nav-link">🏠 Trang chủ</a></li>';
+            html += '<li class="nav-item"><a href="FormMuonSach.html" class="nav-link active">📘 Mượn sách</a></li>';
+            html += '<li class="nav-item"><a href="FormThemXoaSua.html" class="nav-link">📝 Quản lý sách</a></li>';
+            html += '<li class="nav-item"><a href="FormTraCuuDocGia.html" class="nav-link">🔎 Tra cứu độc giả</a></li>';
+            html += '<li class="nav-item"><a href="FormTraCuuMuonTra.html" class="nav-link">📚 Tra cứu mượn trả</a></li>';
+            html += '<li class="nav-item"><a href="FormTinhTrangTaiLieu.html" class="nav-link">📄 Tình trạng sách</a></li>';
+            html += '<li class="nav-item"><a href="FromTimKiem.html" class="nav-link">🔍 Tìm kiếm</a></li>';
+            if (isAdmin) {
+                html += '<li class="nav-item"><a href="statistical.html" class="nav-link">📊 Thống kê</a></li>';
+                html += '<li class="nav-item"><a href="admin_users.html" class="nav-link">👥 Quản lý nhân viên</a></li>';
+                html += '<li class="nav-item"><a href="admin_help_requests.html" class="nav-link">📬 Yêu cầu hỗ trợ</a></li>';
+                html += '<li class="nav-item"><a href="payments.html" class="nav-link">💰 Quản lý thanh toán</a></li>';
+            }
+            html += '</ul><h1>HỖ TRỢ</h1><ul>';
+            html += '<li class="nav-item"><a href="settings.html" class="nav-link">⚙️ Cài đặt</a></li>';
+            if (isLibrarian) html += '<li class="nav-item"><a href="help.html" class="nav-link">❓ Trợ giúp</a></li>';
+            html += '<li class="nav-item"><a href="#" onclick="handleLogout()" class="nav-link">🚪 Đăng xuất</a></li></ul>';
+            document.getElementById('sidebar').innerHTML = html;
+        }
     </script>
 </body>
 </html>
